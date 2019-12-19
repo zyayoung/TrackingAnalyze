@@ -82,9 +82,6 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Save as Pascal voc xml
         self.defaultSaveDir = defaultSaveDir
-        self.usingPascalVocFormat = False
-        self.usingYoloFormat = False
-        self.usingKerasYoloFormat = True
 
         # For loading all image under a directory
         self.mImgList = []
@@ -123,9 +120,12 @@ class MainWindow(QMainWindow, WindowMixin):
         useDefaultLabelContainer.setLayout(useDefaultLabelQHBoxLayout)
 
         # Create a widget for edit and diffc button
-        # self.diffcButton = QCheckBox(getStr('useDifficult'))
-        # self.diffcButton.setChecked(False)
-        # self.diffcButton.stateChanged.connect(self.btnstate)
+        self.combineButton = QToolButton()
+        self.combineButton.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+
+        # Add some of widgets to listLayout
+        listLayout.addWidget(self.combineButton)
+
         self.editButton = QToolButton()
         self.editButton.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
 
@@ -142,7 +142,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.labelList.itemSelectionChanged.connect(self.labelSelectionChanged)
         self.labelList.itemDoubleClicked.connect(self.editLabel)
         # Connect to itemChanged to detect checkbox changes.
-        # self.labelList.itemChanged.connect(self.labelItemChanged)
+        self.labelList.itemChanged.connect(self.labelItemChanged)
         listLayout.addWidget(self.labelList)
 
         self.dock = QDockWidget(getStr('boxLabelText'), self)
@@ -151,7 +151,6 @@ class MainWindow(QMainWindow, WindowMixin):
 
         self.fileListWidget = QSlider()
         self.fileListWidget.setOrientation(QtCore.Qt.Horizontal)
-        # self.fileListWidget.itemDoubleClicked.connect(self.fileitemDoubleClicked)
         self.fileListWidget.sliderReleased.connect(self.slider_value_changed)
         filelistLayout = QVBoxLayout()
         filelistLayout.setContentsMargins(0, 0, 0, 0)
@@ -279,6 +278,11 @@ class MainWindow(QMainWindow, WindowMixin):
                       enabled=False)
         self.editButton.setDefaultAction(edit)
 
+        combine = action('Combine Label', self.combineLabel,
+                      'Ctrl+E', 'combine', 'Combine two or more tracks',
+                      enabled=False)
+        self.combineButton.setDefaultAction(combine)
+
         shapeLineColor = action(getStr('shapeLineColor'), self.chshapeLineColor,
                                 icon='color_line', tip=getStr('shapeLineColorDetail'),
                                 enabled=False)
@@ -292,7 +296,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Lavel list context menu.
         labelMenu = QMenu()
-        addActions(labelMenu, (edit, delete))
+        addActions(labelMenu, (edit, combine, delete))
         self.labelList.setContextMenuPolicy(Qt.CustomContextMenu)
         self.labelList.customContextMenuRequested.connect(
             self.popLabelListMenu)
@@ -306,7 +310,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Store actions for further handling.
         self.actions = struct(save=save, open=open, close=close, resetAll = resetAll,
-                              lineColor=color1, create=create, delete=delete, edit=edit, copy=copy,
+                              lineColor=color1, create=create, delete=delete, edit=edit, combine=combine, copy=copy,
                               createMode=createMode, editMode=editMode, advancedMode=advancedMode,
                               shapeLineColor=shapeLineColor, shapeFillColor=shapeFillColor,
                               zoom=zoom, zoomIn=zoomIn, zoomOut=zoomOut, zoomOrg=zoomOrg,
@@ -457,6 +461,7 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.filePath and os.path.isdir(self.filePath):
             self.openDirDialog(dirpath=self.filePath, silent=True)
         self.record = None
+        self.checked_items = []
 
     def keyReleaseEvent(self, event):
         if event.key() == Qt.Key_Control:
@@ -466,11 +471,6 @@ class MainWindow(QMainWindow, WindowMixin):
         if event.key() == Qt.Key_Control:
             # Draw rectangle if Ctrl is pressed
             self.canvas.setDrawingShapeToSquare(True)
-
-    def change_format(self):
-        if self.usingPascalVocFormat: self.set_format(FORMAT_YOLO)
-        elif self.usingYoloFormat: self.set_format(FORMAT_KERAS_YOLO)
-        elif self.usingKerasYoloFormat: self.set_format(FORMAT_PASCALVOC)
 
     def noShapes(self):
         return not self.itemsToShapes
@@ -638,14 +638,15 @@ class MainWindow(QMainWindow, WindowMixin):
             item.setText(text)
             item.setBackground(generateColorByText(text))
             self.setDirty()
-
-    # Tzutalin 20160906 : Add file list and dock to move faster
-    def fileitemDoubleClicked(self, item=None):
-        currIndex = self.mImgList.index(ustr(item.text()))
-        if currIndex < len(self.mImgList):
-            filename = self.mImgList[currIndex]
-            if filename:
-                self.loadFile(filename)
+    
+    def combineLabel(self):
+        combine_to = self.checked_items[0].text()
+        
+        for item in self.checked_items[1:]:
+            self.record.combine(combine_to, item.text())
+            self.remLabel(item.text())
+        self.checked_items = self.checked_items[:1]
+    
     def slider_value_changed(self):
         self.loadFile(self.fileListWidget.value())
     # Add chris
@@ -677,7 +678,6 @@ class MainWindow(QMainWindow, WindowMixin):
 
     # React to canvas signals.
     def shapeSelectionChanged(self, selected=False):
-        print(selected)
         if self._noSelectionSlot:
             self._noSelectionSlot = False
         else:
@@ -745,42 +745,6 @@ class MainWindow(QMainWindow, WindowMixin):
         annotationFilePath = ustr(annotationFilePath)
         if self.labelFile is None:
             self.labelFile = LabelFile()
-            self.labelFile.verified = self.canvas.verified
-
-        def format_shape(s):
-            return dict(label=s.label,
-                        line_color=s.line_color.getRgb(),
-                        fill_color=s.fill_color.getRgb(),
-                        points=[(p.x(), p.y()) for p in s.points],
-                       # add chris
-                        difficult = s.difficult)
-
-        shapes = [format_shape(shape) for shape in self.canvas.shapes]
-        # Can add differrent annotation formats here
-        try:
-            if self.usingPascalVocFormat is True:
-                if annotationFilePath[-4:].lower() != ".xml":
-                    annotationFilePath += XML_EXT
-                self.labelFile.savePascalVocFormat(annotationFilePath, shapes, self.filePath, self.imageData,
-                                                   self.lineColor.getRgb(), self.fillColor.getRgb())
-            elif self.usingYoloFormat is True:
-                if annotationFilePath[-4:].lower() != ".txt":
-                    annotationFilePath += TXT_EXT
-                self.labelFile.saveYoloFormat(annotationFilePath, shapes, self.filePath, self.imageData, self.labelHist,
-                                                   self.lineColor.getRgb(), self.fillColor.getRgb())
-            elif self.usingKerasYoloFormat is True:
-                if annotationFilePath[-4:].lower() != ".txt":
-                    annotationFilePath += TXT_EXT
-                self.labelFile.saveKerasYoloFormat(annotationFilePath, shapes, self.filePath, self.imageData, self.labelHist,
-                                                   self.lineColor.getRgb(), self.fillColor.getRgb())
-            else:
-                self.labelFile.save(annotationFilePath, shapes, self.filePath, self.imageData,
-                                    self.lineColor.getRgb(), self.fillColor.getRgb())
-            print('Image:{0} -> Annotation:{1}'.format(self.filePath, annotationFilePath))
-            return True
-        except LabelFileError as e:
-            self.errorMessage(u'Error saving label data', u'<b>%s</b>' % e)
-            return False
 
     def copySelectedShape(self):
         # self.addLabel(self.canvas.copySelectedShape())
@@ -802,14 +766,11 @@ class MainWindow(QMainWindow, WindowMixin):
             # self.diffcButton.setChecked(shape.difficult)
 
     def labelItemChanged(self, item):
-        shape = self.itemsToShapes[item]
-        label = item.text()
-        if label != shape.label:
-            shape.label = item.text()
-            shape.line_color = generateColorByText(shape.label)
-            self.setDirty()
-        else:  # User probably changed item visibility
-            self.canvas.setShapeVisible(shape, item.checkState() == Qt.Checked)
+        if item.checkState() == Qt.Checked:
+            self.checked_items.append(item)
+        else:
+            self.checked_items.remove(item)
+        self.combineButton.setEnabled(len(self.checked_items) >= 2)
 
     # Callback functions:
     def newShape(self):
@@ -1044,7 +1005,7 @@ class MainWindow(QMainWindow, WindowMixin):
     def openMjpeg(self, _value=False, dirpath=None, silent=False):
         if not self.mayContinue():
             return
-        self.importMJpegImages(('/home/zya/Documents/GitHub/K210-MouseTracking/4.txt', 'File (*.txt)'))
+        self.importMJpegImages(('/home/zya/Documents/GitHub/K210-MouseTracking/25.txt', 'File (*.txt)'))
         return
 
         targetDirPath = ustr(QFileDialog.getOpenFileName(self,'%s - Choose a txt file' % __appname__, defaultOpenDirPath, 'File (*.txt)'))

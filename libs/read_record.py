@@ -5,11 +5,11 @@ import io
 
 from libs.sort import Sort
 
-
 class Record:
     def __init__(self, ann_filename):
         self.ann_filename = ann_filename.replace(".mjpeg", ".txt")
         ann_raw = open(self.ann_filename).read().split("T")
+
         self.ann = []
         self.p = []
         self.times = []
@@ -17,6 +17,8 @@ class Record:
         self.dets = []
         self.trks = []
         self.unique_ids = []
+        self.tracked_id = []
+
         for i in range(len(ann_raw)-1):
             a = ann_raw[i].split()
             if a:
@@ -48,7 +50,6 @@ class Record:
         self.run_sort()
     
     def run_sort(self):
-        self.tracked_id = []
         self.tracker = Sort(max_age=12, min_hits=6)
         for i, dets in enumerate(self.dets):
             trks = self.tracker.update(dets)
@@ -125,6 +126,11 @@ class Record:
                 0,
             ])
         return shapes
+    
+    def combine(self, to, fr):
+        self.tracked_id[self.tracked_id[..., -1] == int(fr), -1] = int(to)
+        print(self.tracked_id)
+        self.unique_ids.remove(fr)
     
 if __name__ == "__main__":
     rec = Record("25.txt")
