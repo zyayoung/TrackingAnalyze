@@ -1127,10 +1127,6 @@ class MainWindow(QMainWindow, WindowMixin):
             self._saveFile(savedPath if self.labelFile
                            else self.saveFileDialog(removeExt=False))
 
-    def saveFileAs(self, _value=False):
-        assert not self.image.isNull(), "cannot save empty image"
-        self._saveFile(self.saveFileDialog())
-
     def saveFileDialog(self, removeExt=True):
         caption = '%s - Choose File' % __appname__
         filters = 'File (*%s)' % LabelFile.suffix
