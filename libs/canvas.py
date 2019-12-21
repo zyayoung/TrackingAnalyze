@@ -274,7 +274,7 @@ class Canvas(QWidget):
             self.current.addPoint(QPointF(maxX, minY))
             self.current.addPoint(targetPos)
             self.current.addPoint(QPointF(minX, maxY))
-            self.current.addPoint(QPointF((minX+maxX)/2, (minY+maxY)/2))
+            # self.current.addPoint(QPointF((minX+maxX)/2, (minY+maxY)/2))
             self.finalise()
         elif not self.outOfPixmap(pos):
             self.current = Shape()
@@ -298,6 +298,8 @@ class Canvas(QWidget):
             self.finalise()
 
     def selectShape(self, label):
+        if type(label) != str:
+            label = label.label
         self.deSelectShape()
         for shape in self.shapes:
             if shape.label == label:
@@ -306,6 +308,7 @@ class Canvas(QWidget):
                 self.setHiding()
                 self.selectionChanged.emit(True)
                 self.update()
+                break
 
     def selectShapePoint(self, point):
         """Select the first shape created which contains this point."""
@@ -691,11 +694,16 @@ class Canvas(QWidget):
 
     def loadPixmap(self, pixmap):
         self.pixmap = pixmap
-        self.shapes = []
+        # self.shapes = []
         self.repaint()
 
     def loadShapes(self, shapes):
         self.shapes = list(shapes)
+        self.current = None
+        self.repaint()
+
+    def addShapes(self, shapes):
+        self.shapes += list(shapes)
         self.current = None
         self.repaint()
 

@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 from PIL import Image
 import io
+import os
+import matplotlib.pyplot as plt
 
 from libs.sort import Sort
 
@@ -18,6 +20,7 @@ class Record:
         self.trks = []
         self.unique_ids = []
         self.tracked_id = []
+        self.frame_shape = (224, 320, 3)
 
         for i in range(len(ann_raw)-1):
             a = ann_raw[i].split()
@@ -36,18 +39,23 @@ class Record:
         self.vid_file = open(self.ann_filename[:-4]+".mjpeg", "rb")
 
         # Gen interval
-        self.times = np.array(self.times)
-        self.intervals = np.zeros_like(self.times)
-        self.intervals[:-1] = self.times[1:] - self.times[:-1]
-        self.intervals[-1] = 1000/self.get_mean_fps()
+        self.times = np.array(self.times) / 1000
+        self.interval = np.concatenate((self.times[1:] - self.times[:-1], [0]))
 
         self.cur_pos = 0
         self.threshold = 0.0
 
         # Sort
         self.tracker = None
-        self.sorted = False
-        self.run_sort()
+        trk_path = self.ann_filename[:-4]+".trk.npz"
+        if os.path.exists(trk_path):
+            self.tracked_id = np.load(trk_path)['tracked_id']
+            self.unique_ids = list(map(str, np.unique(self.tracked_id[..., -1])))
+            self.sorted = True
+        else:
+            self.sorted = False
+            self.run_sort()
+            np.savez(trk_path, tracked_id=self.tracked_id)
     
     def run_sort(self):
         self.tracker = Sort(max_age=12, min_hits=6)
@@ -83,8 +91,11 @@ class Record:
         keep = dets[..., 4] > self.threshold
         return dets[keep]
     
-    def get_trks(self, index=None):
+    def get_trks(self, index=None, id=None):
+        # trks: [frame_idx, xmin, ymin, xmax, ymax, id]
         if index is None:
+            if id is not None:
+                return self.tracked_id[self.tracked_id[..., -1] == id]
             index = self.cur_pos
         if self.sorted:
             trks = self.tracked_id[self.tracked_id[..., 0]==index][..., 1:]
@@ -93,21 +104,32 @@ class Record:
             trks[..., -1] = -1
         return trks
     
+    def get_centers(self, id):
+        points = self.get_trks(id=id)
+        c = np.array([
+                points[..., [1, 3]].mean(-1),
+                points[..., [2, 4]].mean(-1),
+            ]).T
+        return c
+    
+    def get_times(self, id):
+        points = self.get_trks(id=id)
+        return self.times[points[..., 0]]
+    
     def get_id_first_occur(self, id):
-        return self.tracked_id[self.tracked_id[..., -1] == id][..., 0]
+        return self.get_trks(id=id)[..., 0]
     
     def get_time(self, index=None):
         if index is None:
             index = self.cur_pos
         return self.times[index]
     
-    def get_interval(self, index=None):
-        if index is None:
-            index = self.cur_pos
-        return self.intervals[index]
+    def get_intervals(self, id):
+        points = self.get_trks(id=id)
+        return self.interval[points[..., 0]]
     
     def get_mean_fps(self):
-        return len(self.times) * 1000 / (self.times[-1] - self.times[0])
+        return len(self.times) / (self.times[-1] - self.times[0])
     
     def scanAllImages(self):
         return list(map(str, range(self.frame_count)))
@@ -129,8 +151,26 @@ class Record:
     
     def combine(self, to, fr):
         self.tracked_id[self.tracked_id[..., -1] == int(fr), -1] = int(to)
-        print(self.tracked_id)
         self.unique_ids.remove(fr)
+    
+    def time_distribution(self):
+        plt.scatter(self.tracked_id[..., 0], self.tracked_id[..., -1])
+        plt.show()
+    
+    def plot_path(self, id):
+        trks = self.tracked_id[self.tracked_id[..., -1] == id]
+        plt.plot(trks[..., [1, 3]].mean(-1), trks[..., [2, 4]].mean(-1), label=id)
+    
+    def plot_speed(self, id):
+        trks = self.tracked_id[self.tracked_id[..., -1] == id]
+        x, y = trks[..., [1, 3]].mean(-1), trks[..., [2, 4]].mean(-1)
+        dx = x[1:] - x[:-1]
+        dy = y[1:] - y[:-1]
+        dr = np.sqrt(dx**2 + dy**2)
+        dt = self.times[trks[1:, 0]] - self.times[trks[:-1, 0]]
+        speed = dr/dt
+        time = (self.times[trks[1:, 0]] + self.times[trks[:-1, 0]]) / 2
+        plt.plot(time, speed, label=id)
     
 if __name__ == "__main__":
     rec = Record("25.txt")
